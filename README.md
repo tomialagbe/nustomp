@@ -1,2 +1,2 @@
 # nustomp
-Stomp server
+Nustomp is a lightweight STOMP server.
