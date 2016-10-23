@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+const (
+	maxHeaderLines  = 20          // a frame should not have more than maxHeaderLines headers
+	maxHeaderLength = 1024        // a frame header line should not be longer than maxHeaderLength bytes
+	maxBodyLength   = 1024 * 1000 // 1MB maximum frame body length
+)
+
 // Frame represents a STOMP frame
 type Frame struct {
 	command  Command
@@ -34,6 +40,12 @@ func (f Frame) ToBytes() []byte {
 	// write null octet
 	buffer.WriteByte(0)
 	return buffer.Bytes()
+}
+
+// GetHeader returns the value of a header in the frame
+// If the header does not exist, an empty string is returned
+func (f Frame) GetHeader(key string) string {
+	return ""
 }
 
 // FrameHeader represents the headers sent in a stomp frame
@@ -76,7 +88,7 @@ func parseFrame(data []byte) (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Parsing frame command %s", string(commandln))
+
 	command, err := parseCommand(commandln)
 	log.Printf("Parsed frame command %s", string(commandln))
 	if err != nil {
@@ -96,6 +108,15 @@ func parseFrame(data []byte) (*Frame, error) {
 		// blank line between headers and body
 		if len(strings.TrimSpace(string(ln))) == 0 {
 			break
+		}
+
+		// if there are more headers than allowed
+		if len(headers) == maxHeaderLength {
+			return nil, fmt.Errorf("Too many headers. The maximum number of allowed headers is %d", maxHeaderLength)
+		}
+
+		if len(ln) > maxHeaderLength {
+			return nil, fmt.Errorf("Header lines should not be longer that %d bytes", maxHeaderLength)
 		}
 		log.Printf("Parsing frame header %s", string(ln))
 		header, err := parseFrameHeader(ln)
@@ -125,6 +146,9 @@ func parseFrame(data []byte) (*Frame, error) {
 			b, err := rd.ReadByte()
 			if err != nil && err != io.EOF {
 				return nil, err
+			}
+			if len(body) == maxBodyLength {
+				return nil, fmt.Errorf("Content too large. The body should not be more than %d bytes", maxBodyLength)
 			}
 			body = append(body, b)
 		}
