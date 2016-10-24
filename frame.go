@@ -118,7 +118,6 @@ func parseFrame(data []byte) (*Frame, error) {
 		if len(ln) > maxHeaderLength {
 			return nil, fmt.Errorf("Header lines should not be longer that %d bytes", maxHeaderLength)
 		}
-		log.Printf("Parsing frame header %s", string(ln))
 		header, err := parseFrameHeader(ln)
 		log.Printf("Parsed frame header %s", string(ln))
 		if err != nil {

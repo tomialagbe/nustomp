@@ -6,6 +6,8 @@ import "fmt"
 type Command string
 
 const (
+	Connect     Command = "CONNECT"
+	Stomp       Command = "STOMP"
 	Send        Command = "SEND"
 	Subscribe   Command = "SUBSCRIBE"
 	Unsubscribe Command = "UNSUBSCRIBE"
