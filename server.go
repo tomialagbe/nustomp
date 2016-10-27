@@ -12,11 +12,11 @@ import (
 type Server struct {
 	bindPort int
 	// connectChan chan net.Conn
-	clients              map[int]*Client
-	clientCount          int
-	clientCountLock      sync.Mutex
-	outHeartBeatInterval int // the minimum number of seconds between server-sent heartbeats, or zero for none
-	inHeartBeatInterval  int // the desired number of seconds between heartbeats from client that can send heartbeats
+	clients         map[int]*Client
+	clientCount     int
+	clientCountLock sync.Mutex
+	heartBeatX      int // the minimum number of seconds between server-sent heartbeats, or zero for none
+	heartBeatY      int // the desired number of seconds between heartbeats from client that can send heartbeats
 }
 
 // NewServer creates a new STOMP Server.
@@ -32,9 +32,9 @@ func NewServer(port int) *Server {
 // SetHeartBeat sets the heart-beat interval for this server
 // For example the call s.SetHeartBeat(30000, 60000) this server expects heartbeats from clients (that support heartbeats)
 // every 30 seconds and guarantees approximately a minute between the heartbeats it sends
-func (s *Server) SetHeartBeat(in, out int) {
-	s.inHeartBeatInterval = in
-	s.outHeartBeatInterval = out
+func (s *Server) SetHeartBeat(x, y int) {
+	s.heartBeatX = x
+	s.heartBeatY = y
 }
 
 // Start starts the STOMP server.
@@ -43,6 +43,21 @@ func (s *Server) SetHeartBeat(in, out int) {
 func (s *Server) Start() {
 	log.Printf("Starting server on port :%d", s.bindPort)
 	s.acceptConnections()
+	// TODO: start listening for, and sending out heartbeats
+}
+
+// canSendHeartBeatToClient returns true if the server can send heartbeats to the client
+// specified by clientID
+func (s *Server) canSendHeartBeatToClient(clientID int) bool {
+	client, ok := s.clients[clientID]
+	if !ok {
+		return false
+	}
+
+	if s.heartBeatX > 0 && client.heartBeatY > 0 {
+		return true
+	}
+	return false
 }
 
 // acceptConnections listens for incoming connections
@@ -79,6 +94,7 @@ func (s *Server) addClient(conn net.Conn) int {
 	client.remoteAddr = conn.RemoteAddr().String()
 	client.conn = conn
 	client.stompVersion = 1.2
+	client.server = s
 
 	s.clients[id] = client
 	s.clientCount++
@@ -94,6 +110,7 @@ func (s *Server) removeClient(id int) {
 	if ok {
 		// close the connection
 		client.Close()
+		client.server = nil
 		// then, delete the client
 		delete(s.clients, id)
 	}
@@ -163,14 +180,25 @@ func (s *Server) sendErrorFrame(clientid int, clientFrame *Frame, err error) {
 
 // Client represents a STOMP client
 type Client struct {
-	id                int
-	remoteAddr        string
-	conn              net.Conn
-	stompVersion      float64 // the stomp version to use in communicating with this client
-	heartBeatInterval int64   // the minimum number of milliseconds between heartbeats from this client or zero for none
+	id           int
+	remoteAddr   string
+	conn         net.Conn
+	server       *Server
+	stompVersion float64 // the stomp version to use in communicating with this client
+	heartBeatX   int     // the minimum number of milliseconds between heartbeats from this client or zero for none
+	heartBeatY   int
 }
 
 // Close terminates the connection with the client
 func (c Client) Close() {
 	c.conn.Close()
+}
+
+// canSendHeartBeat returns true if this client can send heart beats to a server
+func (c Client) canSendHeartBeat() bool {
+	// if the client's x heartbeat is not zero and the servers y-heartbeat is not zero
+	if c.heartBeatX > 0 && c.server.heartBeatY > 0 {
+		return true
+	}
+	return false
 }
