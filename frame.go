@@ -3,6 +3,7 @@ package nustomp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +29,7 @@ type Frame struct {
 func (f Frame) ToBytes() []byte {
 	// write command
 	buffer := bytes.NewBufferString(string(f.command))
+	buffer.WriteString("\n")
 
 	// write headers
 	for _, header := range f.headers {
@@ -45,6 +47,11 @@ func (f Frame) ToBytes() []byte {
 // GetHeader returns the value of a header in the frame
 // If the header does not exist, an empty string is returned
 func (f Frame) GetHeader(key string) string {
+	for _, header := range f.headers {
+		if header.key == key {
+			return header.value
+		}
+	}
 	return ""
 }
 
@@ -64,8 +71,8 @@ func (h FrameHeader) ToString() string {
 	return fmt.Sprintf("%s:%s", h.key, h.value)
 }
 
-func parseFrame(data []byte) (*Frame, error) {
-	rd := bufio.NewReader(bytes.NewReader(data))
+func parseFrame(r io.Reader) (*Frame, error) {
+	rd := bufio.NewReader(r)
 
 	readline := func() ([]byte, error) {
 		line := bytes.NewBuffer([]byte{})
@@ -183,4 +190,71 @@ func parseFrameHeader(b []byte) (FrameHeader, error) {
 
 	h = FrameHeader{key: parts[0], value: parts[1]}
 	return h, nil
+}
+
+// handles a stomp frame and return the appropriate response frame
+func handleFrame(client *Client, frame *Frame) (*Frame, error) {
+	switch frame.command {
+	case Connect, Stomp:
+		return handleConnectFrame(client, frame)
+	default:
+		return nil, errors.New("Currently unable to handle this frame")
+	}
+}
+
+// handles the CONNECT or STOMP frames
+// Handle the accept-version header
+// As per the STOMP specification, pick the highest version number from the list of versions the client supports
+// and continue with that version
+func handleConnectFrame(client *Client, frame *Frame) (*Frame, error) {
+
+	// handle version
+	version, err := getSupportedVersion(*frame)
+	if err != nil {
+		return nil, err
+	}
+	client.stompVersion = version
+
+	// handle heart-beat settings
+	heartbeat := frame.GetHeader("heart-beat")
+	if heartbeat != "" {
+
+	}
+
+	// construct the response CONNECTED frame
+	connectedFrame := new(Frame)
+	connectedFrame.command = Connected
+
+	headers := []FrameHeader{
+		{"version", fmt.Sprintf("%1.1f", version)},
+	}
+	connectedFrame.headers = headers
+	return connectedFrame, nil
+}
+
+func getSupportedVersion(frame Frame) (float64, error) {
+	// handle version
+	var highestVersion = 1.0
+	versionstr := frame.GetHeader("accept-version")
+	if versionstr != "" {
+		split := strings.Split(versionstr, ",")
+		for _, ver := range split {
+			ver = strings.TrimSpace(ver)
+			versionnum, err := strconv.ParseFloat(ver, 64)
+			//bad header value
+			if err != nil {
+				return 0, fmt.Errorf("Failed to parse 'accept-version' header %s. \nBad value %s. \nSupported Protocol versions are 1.0, 1.1, 1.2.", versionstr, ver)
+			}
+
+			if versionnum > 1.2 || versionnum < 1.0 {
+				return 0, fmt.Errorf("Invalid version number. Supported versions are 1.0, 1.1, 1.2")
+			}
+
+			// header is ok
+			if versionnum > highestVersion {
+				highestVersion = versionnum
+			}
+		}
+	}
+	return highestVersion, nil
 }

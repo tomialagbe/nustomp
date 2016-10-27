@@ -1,6 +1,7 @@
 package nustomp
 
 import "testing"
+import "bytes"
 
 var frameHeadertests = []struct {
 	testHeader          string
@@ -102,7 +103,7 @@ func TestParseFrameHeader(t *testing.T) {
 
 func TestParseFrame(t *testing.T) {
 	for _, test := range frameTests {
-		frame, err := parseFrame([]byte(test.testFrame))
+		frame, err := parseFrame(bytes.NewReader([]byte(test.testFrame)))
 		if err != nil {
 			t.Error(err)
 		}

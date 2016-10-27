@@ -7,6 +7,7 @@ type Command string
 
 const (
 	Connect     Command = "CONNECT"
+	Connected   Command = "CONNECTED"
 	Stomp       Command = "STOMP"
 	Send        Command = "SEND"
 	Subscribe   Command = "SUBSCRIBE"
@@ -26,6 +27,12 @@ const (
 func parseCommand(r []byte) (Command, error) {
 	var cmd Command
 	switch string(r) {
+	case "CONNECT":
+		cmd = Connect
+	case "STOMP":
+		cmd = Stomp
+	case "CONNECTED":
+		cmd = Connected
 	case "SEND":
 		cmd = Send
 	case "SUBSCRIBE":
@@ -55,4 +62,14 @@ func parseCommand(r []byte) (Command, error) {
 	}
 
 	return cmd, nil
+}
+
+// Returns the response to a given command
+func getCommandResponse(cmd Command) Command {
+	switch cmd {
+	case Connect, Stomp:
+		return Connected
+	default: // TODO: implement responses for other command types
+		return Error
+	}
 }
