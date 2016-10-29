@@ -201,10 +201,34 @@ func parseFrameHeader(b []byte) (FrameHeader, error) {
 
 // handles a stomp frame and return the appropriate response frame
 func handleFrame(client *Client, frame *Frame) (*Frame, error) {
+	var respFrame *Frame
+	var err error
+
 	switch frame.command {
 	case Connect, Stomp:
-		return handleConnectFrame(client, frame)
+		respFrame, err = handleConnectFrame(client, frame)
+	case Disconnect:
+		respFrame, err = handleDisconnectFrame(client, frame)
 	default:
 		return nil, errors.New("Currently unable to handle this frame")
 	}
+
+	return respFrame, err
+}
+
+// Checks if a client-originated frame contains a receipt header and returns a RECEIPT frame with the corresponding receipt-id
+// header set. If required is set to true, this method returns an error if the client frame does not send a receipt header
+func handleReceiptHeader(clientFrame *Frame, required bool) (*Frame, error) {
+	receipt := clientFrame.GetHeader("receipt")
+
+	if receipt != "" {
+		responseFrame := new(Frame)
+		responseFrame.command = Receipt
+		responseFrame.headers = []FrameHeader{
+			{"receipt-id", receipt},
+		}
+		return responseFrame, nil
+	}
+
+	return nil, errors.New("receipt header is required")
 }

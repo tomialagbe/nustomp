@@ -80,3 +80,11 @@ func getSupportedVersion(frame Frame) (float64, error) {
 	}
 	return highestVersion, nil
 }
+
+// handle the DISCONNECT frame
+// although clients can disconnect from the server at any time by closing the
+// undelying socket connection; to do a graceful shutdown, STOMP clients are required to
+// send a DISCONNECT frame
+func handleDisconnectFrame(client *Client, frame *Frame) (*Frame, error) {
+	return handleReceiptHeader(frame, true)
+}

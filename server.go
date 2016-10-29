@@ -135,6 +135,12 @@ func (s *Server) startConversation(id int) {
 			}
 			client.conn.Write(responseFrame.ToBytes())
 
+			// if the command was a DISCONNECT command, disconnect the client after sending back the response
+			if frame.command == Disconnect {
+				client.conn.Close()
+				client.server.removeClient(client.id)
+				return
+			}
 		} else {
 			client.resetHeartBeatTimer()
 		}
@@ -157,6 +163,9 @@ func (s *Server) sendErrorFrame(clientid int, clientFrame *Frame, err error) {
 
 	headers := []FrameHeader{
 		{"message", errMsg},
+	}
+	if clientFrame != nil && clientFrame.GetHeader("receipt") != "" {
+		headers = append(headers, FrameHeader{"receipt-id", clientFrame.GetHeader("receipt")})
 	}
 
 	bodybuff := bytes.NewBufferString("")
