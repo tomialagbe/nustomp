@@ -102,6 +102,13 @@ func parseFrame(r io.Reader) (*Frame, error) {
 		return nil, err
 	}
 
+	// heart beats have no response
+	if command == HeartBeat {
+		return &Frame{
+			command: HeartBeat,
+		}, nil
+	}
+
 	// headers
 	var contlen = -1
 	var conttype = ""

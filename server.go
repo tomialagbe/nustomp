@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // Server represents a STOMP Server
@@ -74,14 +75,14 @@ func (s *Server) acceptConnections() {
 		}
 
 		log.Printf("Recieved connection from %s", conn.RemoteAddr().String())
-		go s.handleConnection(conn)
-	}
-}
 
-func (s *Server) handleConnection(conn net.Conn) {
-	id := s.addClient(conn)
-	// start conversation with this new client
-	s.startConversation(id)
+		// handle new connection on new goroutine
+		go func() {
+			id := s.addClient(conn)
+			// start conversation with this new client
+			s.startConversation(id)
+		}()
+	}
 }
 
 // add a new client to this server and returns the id of the new client
@@ -125,14 +126,20 @@ func (s *Server) startConversation(id int) {
 
 	var err error
 	for frame, err := parseFrame(client.conn); err == nil; {
-		// handle the frame
-		responseFrame, err := handleFrame(client, frame)
-		if err != nil {
-			s.sendErrorFrame(id, frame, err)
-			return
-		}
-		client.conn.Write(responseFrame.ToBytes())
+		if frame.command != HeartBeat {
+			// handle the frame (non heart-beat frames)
+			responseFrame, err := handleFrame(client, frame)
+			if err != nil {
+				s.sendErrorFrame(id, frame, err)
+				return
+			}
+			client.conn.Write(responseFrame.ToBytes())
 
+		} else {
+			client.resetHeartBeatTimer()
+		}
+
+		// read the next frame
 		frame, err = parseFrame(client.conn)
 	}
 
@@ -180,22 +187,61 @@ func (s *Server) sendErrorFrame(clientid int, clientFrame *Frame, err error) {
 
 // Client represents a STOMP client
 type Client struct {
-	id           int
-	remoteAddr   string
-	conn         net.Conn
-	server       *Server
-	stompVersion float64 // the stomp version to use in communicating with this client
-	heartBeatX   int     // the minimum number of milliseconds between heartbeats from this client or zero for none
-	heartBeatY   int
+	id             int
+	remoteAddr     string
+	conn           net.Conn
+	server         *Server
+	stompVersion   float64 // the stomp version to use in communicating with this client
+	heartBeatX     int     // the minimum number of milliseconds between heartbeats from this client or zero for none
+	heartBeatY     int
+	heartBeatTimer *time.Timer
 }
 
 // Close terminates the connection with the client
-func (c Client) Close() {
+func (c *Client) Close() {
 	c.conn.Close()
 }
 
+// SetHeartBeat sets the x and y heartbeats for the client
+func (c *Client) SetHeartBeat(x, y int) {
+	c.heartBeatX = x
+	c.heartBeatY = y
+
+	// start listening for heartbeats only if the client and server support it
+	if c.canSendHeartBeat() {
+		c.resetHeartBeatTimer()
+		go func() {
+			select {
+			case <-c.heartBeatTimer.C:
+				// disconnect this client because it has been idle up until the timeout
+				c.Close()
+				c.server.removeClient(c.id)
+				return
+			}
+		}()
+	}
+}
+
+func (c *Client) resetHeartBeatTimer() {
+	// add 10 extra seconds to heart beat interval
+	dur := time.Duration(c.heartBeatX) + (time.Second * 10)
+	if c.heartBeatTimer == nil {
+		c.heartBeatTimer = time.NewTimer(dur)
+	} else {
+		c.heartBeatTimer.Reset(dur)
+	}
+
+}
+
 // canSendHeartBeat returns true if this client can send heart beats to a server
-func (c Client) canSendHeartBeat() bool {
+func (c *Client) canSendHeartBeat() bool {
+	if c.heartBeatY > 0 && c.server.heartBeatX > 0 {
+		return true
+	}
+	return false
+}
+
+func (c *Client) canRecieveHeartBeat() bool {
 	// if the client's x heartbeat is not zero and the servers y-heartbeat is not zero
 	if c.heartBeatX > 0 && c.server.heartBeatY > 0 {
 		return true

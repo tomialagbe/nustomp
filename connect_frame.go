@@ -26,6 +26,8 @@ func handleConnectFrame(client *Client, frame *Frame) (*Frame, error) {
 	headers = append(headers, FrameHeader{"version", fmt.Sprintf("%1.1f", version)})
 
 	// handle heart-beat settings
+	clientHbX := 0
+	clientHbY := 0
 	heartbeatheader := frame.GetHeader("heart-beat")
 	if heartbeatheader != "" {
 		hbparts := strings.Split(heartbeatheader, ",")
@@ -33,20 +35,20 @@ func handleConnectFrame(client *Client, frame *Frame) (*Frame, error) {
 			return nil, fmt.Errorf("Failed to parse 'heart-beat' header %s", heartbeatheader)
 		}
 
-		clientHbX, err := strconv.Atoi(strings.TrimSpace(hbparts[0]))
+		clientHbX, err = strconv.Atoi(strings.TrimSpace(hbparts[0]))
 		if err != nil {
 			return nil, fmt.Errorf("Failed to parse 'heart-beat' header %s. \nBad value %s.", heartbeatheader, hbparts[0])
 		}
 
-		clientHbY, err := strconv.Atoi(strings.TrimSpace(hbparts[1]))
+		clientHbY, err = strconv.Atoi(strings.TrimSpace(hbparts[1]))
 		if err != nil {
 			return nil, fmt.Errorf("Failed to parse 'heart-beat' header %s. \nBad value %s.", heartbeatheader, hbparts[0])
 		}
 
-		client.heartBeatX = clientHbX
-		client.heartBeatY = clientHbY
+		// only send back heart-beat header if the client sent heart beat headers in its request
 		headers = append(headers, FrameHeader{"heart-beat", fmt.Sprintf("%d,%d", client.server.heartBeatX, client.server.heartBeatY)})
 	}
+	client.SetHeartBeat(clientHbX, clientHbY)
 
 	connectedFrame.headers = headers
 	return connectedFrame, nil

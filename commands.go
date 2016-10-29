@@ -22,11 +22,18 @@ const (
 	Message Command = "MESSAGE"
 	Receipt Command = "RECEIPT"
 	Error   Command = "ERROR"
+
+	// The heart beat is not actually a command
+	// According to the STOMP specifcation clients that don't have any STOMP frame
+	// to send can send the EOL character for heartbeats
+	HeartBeat Command = "HeartBeat"
 )
 
 func parseCommand(r []byte) (Command, error) {
 	var cmd Command
 	switch string(r) {
+	case "\r\n", "\n":
+		cmd = HeartBeat
 	case "CONNECT":
 		cmd = Connect
 	case "STOMP":
