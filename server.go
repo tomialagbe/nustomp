@@ -12,12 +12,17 @@ import (
 // Server represents a STOMP Server
 type Server struct {
 	bindPort int
-	// connectChan chan net.Conn
+
 	clients         map[int]*Client
 	clientCount     int
 	clientCountLock sync.Mutex
-	heartBeatX      int // the minimum number of seconds between server-sent heartbeats, or zero for none
-	heartBeatY      int // the desired number of seconds between heartbeats from client that can send heartbeats
+
+	heartBeatX int // the minimum number of seconds between server-sent heartbeats, or zero for none
+	heartBeatY int // the desired number of seconds between heartbeats from client that can send heartbeats
+
+	subscriptions   map[string][]subscription // a map of destinations to client subscriptions
+	messageChannels map[string]chan message   // a map of destinations to the channels over which messages would be dispatched
+	unackedMessages map[int][]message         // a map of subscription ids to unacked messages
 }
 
 // NewServer creates a new STOMP Server.
@@ -25,8 +30,10 @@ type Server struct {
 func NewServer(port int) *Server {
 	s := new(Server)
 	s.bindPort = port
-	// s.connectChan = make(chan net.Conn)
 	s.clients = make(map[int]*Client)
+	s.subscriptions = make(map[string][]subscription)
+	s.messageChannels = make(map[string]chan message)
+	s.unackedMessages = make(map[int][]message)
 	return s
 }
 
@@ -43,7 +50,10 @@ func (s *Server) SetHeartBeat(x, y int) {
 // on the port specified during creation
 func (s *Server) Start() {
 	log.Printf("Starting server on port :%d", s.bindPort)
+
+	// start listening for and accepting connections
 	s.acceptConnections()
+
 	// TODO: start listening for, and sending out heartbeats
 }
 
@@ -112,8 +122,108 @@ func (s *Server) removeClient(id int) {
 		// close the connection
 		client.Close()
 		client.server = nil
+
+		// remove all subscriptions
+		s.removeAllSubscriptionsForClient(client.id)
+
 		// then, delete the client
 		delete(s.clients, id)
+	}
+}
+
+// subscribes a client with clientID to messages delivered on destination
+func (s *Server) addSubscription(destination string, subscriptionID, clientID int, mode ackMode) {
+	if s.subscriptions[destination] == nil {
+		s.subscriptions[destination] = make([]subscription, 0, 100)
+		// if this the first ever subscription to this destination, we need to create a new entry in the messageChannels map
+		s.messageChannels[destination] = make(chan message, 100) // create a buffered channel that can buffer 100 messages
+		go func() {
+			for {
+				msg, more := <-s.messageChannels[destination]
+				if !more {
+					return
+				}
+				s.dispatchMessage(msg, destination)
+			}
+		}()
+	}
+
+	subscr := subscription{subscriptionID, clientID, destination, mode}
+	s.subscriptions[destination] = append(s.subscriptions[destination], subscr)
+}
+
+func (s *Server) removeSubscription(destination string, subscriptionID int) {
+	subscrs := s.subscriptions[destination]
+	if subscrs == nil {
+		return
+	}
+
+	pos := -1
+	for idx, sub := range subscrs {
+		if subscriptionID == sub.id {
+			pos = idx
+			break
+		}
+	}
+
+	if pos != -1 {
+		// delete the subscription
+		newsubs := append(subscrs[:pos], subscrs[pos+1:]...)
+		if len(newsubs) == 0 {
+			close(s.messageChannels[destination]) // close the channel if there are no more subscriptions
+		}
+		s.subscriptions[destination] = newsubs
+	}
+}
+
+func (s *Server) removeAllSubscriptionsForClient(clientID int) {
+	toremove := make(map[string][]int)
+	for dest, subs := range s.subscriptions {
+		for _, sub := range subs {
+			if sub.clientID == clientID {
+				if toremove[dest] == nil {
+					toremove[dest] = []int{sub.id}
+				} else {
+					toremove[dest] = append(toremove[dest], sub.id)
+				}
+			}
+		}
+	}
+
+	for k, ids := range toremove {
+		for _, id := range ids {
+			s.removeSubscription(k, id)
+		}
+	}
+}
+
+func (s *Server) addUnackedMessage(sub subscription, msg message) {
+	if s.unackedMessages[sub.id] == nil {
+		s.unackedMessages[sub.id] = make([]message, 0, 50)
+	}
+	s.unackedMessages[sub.id] = append(s.unackedMessages[sub.id], msg)
+}
+
+func (s *Server) dispatchMessage(msg message, destination string) {
+	subs := s.subscriptions[destination]
+	idx := -1
+	for i, sub := range subs {
+		if msg.sender == sub.clientID {
+			idx = i
+			break
+		}
+	}
+
+	if idx != -1 {
+		// the message should be dispatched to all other clients except the sender
+		subs = append(subs[:idx], subs[idx+1:]...)
+	}
+
+	// dispatch to all clients
+	for _, sub := range subs {
+		client := s.clients[sub.clientID]
+		// send message to client
+		sendMessageToClient(*client, msg, sub)
 	}
 }
 
@@ -133,7 +243,10 @@ func (s *Server) startConversation(id int) {
 				s.sendErrorFrame(id, frame, err)
 				return
 			}
-			client.conn.Write(responseFrame.ToBytes())
+
+			if responseFrame != nil {
+				client.conn.Write(responseFrame.ToBytes())
+			}
 
 			// if the command was a DISCONNECT command, disconnect the client after sending back the response
 			if frame.command == Disconnect {
@@ -141,9 +254,10 @@ func (s *Server) startConversation(id int) {
 				client.server.removeClient(client.id)
 				return
 			}
-		} else {
-			client.resetHeartBeatTimer()
 		}
+
+		// reset the heart-beat timer
+		client.resetHeartBeatTimer()
 
 		// read the next frame
 		frame, err = parseFrame(client.conn)

@@ -70,13 +70,3 @@ func parseCommand(r []byte) (Command, error) {
 
 	return cmd, nil
 }
-
-// Returns the response to a given command
-func getCommandResponse(cmd Command) Command {
-	switch cmd {
-	case Connect, Stomp:
-		return Connected
-	default: // TODO: implement responses for other command types
-		return Error
-	}
-}

@@ -209,6 +209,10 @@ func handleFrame(client *Client, frame *Frame) (*Frame, error) {
 		respFrame, err = handleConnectFrame(client, frame)
 	case Disconnect:
 		respFrame, err = handleDisconnectFrame(client, frame)
+	case Subscribe:
+		respFrame, err = handleSubscribeFrame(client, frame)
+	case Send:
+		respFrame, err = handleSendFrame(client, frame)
 	default:
 		return nil, errors.New("Currently unable to handle this frame")
 	}
@@ -230,5 +234,9 @@ func handleReceiptHeader(clientFrame *Frame, required bool) (*Frame, error) {
 		return responseFrame, nil
 	}
 
-	return nil, errors.New("receipt header is required")
+	if required {
+		return nil, errors.New("receipt header is required")
+	}
+	return nil, nil
+
 }
